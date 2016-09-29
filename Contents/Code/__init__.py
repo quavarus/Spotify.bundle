@@ -71,7 +71,12 @@ def GetAlbum(id):
     trackNumber = track['track_number']
     albumName = album['name']
     artistName = track['artists'][0]['name']
-    oc.add(TrackObject(key=PREFIX+"/tracks/"+trackId, rating_key=trackId, duration=trackDuration, title=trackTitle, index=trackNumber, artist=artistName, album=albumName))
+    genres = []
+    tags = []
+    rating=0.0
+    sourceTitle="Spotify"
+    Log ("trackId="+trackId+" trackDuration="+str(trackDuration)+" trackTitle="+trackTitle+" trackNumber="+str(trackNumber)+" albumName="+albumName+" artistName="+artistName)
+    oc.add(TrackObject(key=PREFIX+"/tracks/"+trackId, rating_key=trackId, duration=trackDuration, title=trackTitle, index=trackNumber, artist=artistName, album=albumName,  genres=genres, tags=tags,  rating=rating, source_title=sourceTitle))
   return oc
 
 @route(PREFIX + '/tracks/{id}')
@@ -106,7 +111,7 @@ def Authenticate():
     postValues = {}
     postValues["grant_type"]="authorization_code"
     postValues["code"]=code
-    postValues["redirect_uri"]="http%3A%2F%2Ftherebelbean.com%2Fspotify%2Fcallback.htm"
+    postValues["redirect_uri"]="https%3A%2F%2Fquavarus.github.io%2FSpotify.bundle%2FWeb%2Fcallback.htm"
     postValues["client_id"]=CLIENT_ID
     postValues["client_secret"]=CLIENT_SECRET
 #    headers = {'Authorization':'Basic '+String.Encode(CLIENT_ID+":"+CLIENT_SECRET)}
