@@ -1,131 +1,576 @@
-# -*- coding: utf-8 -*-
-PREFIX = '/video/spotify'
+from utils import *
+from playback import PlaybackService
+from streamserver import StreamServer
+from metadata import DataService
+
+import modelMangler as m
+from model import *
+
+from lxml import etree
 
 TITLE = L('Spotify')
-ART = 'art-default.jpg'
 ICON = 'icon-default.png'
-PREFS = 'icon-preferences.png'
+ART = "concert.jpeg"
+ABOUT = "about1_1.png"
 
-CLIENT_ID = 'efd43383e71247d6a7f1e244a830a7da'
-CLIENT_SECRET = '55034426c8794a19a66a8ae834227903'
-AUTHORIZE_URL = 'https://accounts.spotify.com/authorize'
-
-
-
+VERSION = "0.1.0"
 
 ####################################################################################################
 def Start():
-  InputDirectoryObject.thumb = R('Search.png')
-  InputDirectoryObject.art = R(ART)
+  
+  HTTP.CacheTime = None
 
-  HTTP.CacheTime = CACHE_1HOUR
-  #HTTP.Headers['User-Agent'] = USER_AGENT
-#  HTTP.Headers['X-GData-Key'] = "key=%s" % DEVELOPER_KEY
+  ObjectContainer.art = R(ART)
 
-#  Dict.Reset()
-  Authenticate()
+  global playback
+  playback = PlaybackService()
+  playback.start()
+  global streamserver
+  streamserver = StreamServer(playback)
+
+  Initialize()
+  Thread.Create(refreshLibraryIndex)
+
+def Initialize():
+  Log.Debug("Initialize()")
+
+  if not checkPreferences():
+    global data
+    data = DataService(Prefs['username'], Prefs['password'])
+    if data.Ready():
+
+      playback.logout()
+      playback.login(Prefs['username'], Prefs['password'])
+      streamserver.stop()
+      streamserver.start(int(Prefs['stream_port']))
+      if 'library_user' not in Dict or Dict['library_user']!=Prefs['username']:
+        buildLibraryIndex()
+        loadLibraryIndexGlobally()
+      try:
+        track_index
+      except NameError:
+        loadLibraryIndexGlobally()
+      
+    
 
 ####################################################################################################
 @route(PREFIX + '/validate')
-def ValidatePrefs():
-  Log ("ValidatePrefs()")
-  Authenticate()
+def ValidatePrefs(**kwargs):
+  Log.Debug("ValidatePrefs()")
+  if(checkPreferences()):
+    Log.Debug(checkPreferences())
+    return False
+
+  Initialize() 
+  if not data.Ready():
+    Log.Debug("Preferences: Username or Password is not correct")
+    return False
+
+  return True
+
+def checkPreferences():
+  if not Prefs['username'] or len(Prefs['username'])==0:
+    return "Preferences: Username and Password must be set"
+  if not Prefs['password'] or len(Prefs['password'])==0:
+    return "Preferences: Username and Password must be set"
+
+  port = Prefs['stream_port']
+  try:
+    int(port)
+  except ValueError:
+    return "Preferences: Streaming Port is not a valid number"
+
+  max_items = Prefs['max_page_items']
+  try:
+    int(max_items)
+  except ValueError:
+    return "Preferences: Max Items Per Page is not a valid number"
+  
+  return None
+
+def refreshLibraryIndex():
+  while True:
+    if Prefs['library_refresh_interval'] == "2 Minutes":
+      interval = 60*2
+    elif Prefs['library_refresh_interval'] ==  "5 Minutes":
+      interval = 60*5
+    elif Prefs['library_refresh_interval'] ==  "15 Minutes":
+      interval = 60*15
+    elif Prefs['library_refresh_interval'] ==  "1/2 Hour":
+      interval = 60*30
+    elif Prefs['library_refresh_interval'] ==  "1 Hour":
+      interval = 60*60
+    else:
+      interval = 60*5
+    Thread.Sleep(interval)
+    buildLibraryIndex()
+    loadLibraryIndexGlobally()
+
+def buildLibraryIndex():
+  Log.Debug('Start Refreshing Library Index')
+  if data.Ready():
+    tracks = {}
+    albums = {}
+    artists = {}
+    
+    items = data.LookupLibraryTracks()
+    for item in items:
+      track = item['track']
+      tracks[track['id']] = track
+
+    items = data.LookupLibraryAlbums()
+    for item in items:
+
+      album = item['album']
+
+      albumArtists = []
+      artistList = album['artists']
+      for artist in artistList:
+        if artist['id'] not in artists:
+          artists[artist['id']] = artist
+          artists[artist['id']]['albums'] = []
+        albumArtists.append(artists[artist['id']])
+        
+      if album['id'] not in albums:
+        album['artists'] = albumArtists
+        albums[album['id']] = album
+
+      for artist in albumArtists:
+        artist['albums'].append(album)
+
+    artistLookupList = []
+    for id, artist in artists.iteritems():
+      artistLookupList.append(artist['id'])
+      if len(artistLookupList) == 50:
+        fullArtists = data.LookupArtists(artistLookupList)
+        for fullArtist in fullArtists:
+          artists[fullArtist['id']]['images'] = fullArtist['images']
+        del artistLookupList[:]
+    if len(artistLookupList) > 0:
+      fullArtists = data.LookupArtists(artistLookupList)
+      for fullArtist in fullArtists:
+        artists[fullArtist['id']]['images'] = fullArtist['images']
+
+    Dict['library_user']=Prefs['username']
+    Data.SaveObject('library_track_index',tracks)
+    Data.SaveObject('library_album_index',albums)
+    Data.SaveObject('library_artist_index',artists)
+
+  Log.Debug('Finished Refreshing Library Index')
+
+def loadLibraryIndexGlobally():
+  global track_index
+  track_index = {}
+  global saved_track_list
+  saved_track_list = []
+  global album_index
+  album_index = {}
+  global artist_index
+  artist_index = {}
+
+  if Dict['library_user']==Prefs['username']:
+    if Data.Exists('library_track_index'):
+      global track_index
+      track_index = Data.LoadObject('library_track_index')
+      global saved_track_list
+      saved_track_list = sorted(track_index.values(), key=lambda t: t['name'].lower())
+    if Data.Exists('library_album_index'):
+      global album_index
+      album_index = Data.LoadObject('library_album_index')
+    if Data.Exists('library_artist_index'):
+      global artist_index
+      artist_index = Data.LoadObject('library_artist_index')
+  Log.Debug('Loaded Library Index Globally')
+
+def getErrorMessage():
+  if checkPreferences():
+    return checkPreferences();
+  if not data.Ready():
+    return "Preferences: Username or Password is not correct"
+
+def getDataServiceStatus():
+  try:
+    if data:
+      if data.Ready():
+        return L("Ready")
+      else:
+        return L("Authentication Failed")
+    else:
+      return L("Not Initialized")
+  except NameError:
+    return L("Not Initialized")
+
+def getPlaybackServiceStatus():
+  try:
+    if playback:
+      return playback.status
+    else:
+      return L("Not Initialized")
+  except NameError:
+    return L("Not Initialized")
+
+def getStreamServiceStatus():
+  try:
+    if streamserver:
+      return streamserver.status()
+    else:
+      return L("Not Initialized")
+  except NameError:
+    return L("Not Initialized")
 
 ####################################################################################################
 @handler(PREFIX, TITLE, R(ART), R(ICON))
-def MainMenu():
-  oc = ObjectContainer(no_cache = True)
-  if Authenticate()==True:
-    oc.add(DirectoryObject(key=Callback(listMyAlbums), title="My Albums"))
-#  return ObjectContainer(header="Empty", message="Maybe Authenticated.")  
-  oc.add(PrefsObject(title='Preferences'))
+def MainMenu(**kwargs):
+  errorMessage = getErrorMessage()
+  oc = ObjectContainer(content=ContainerContent.Mixed,
+    title_bar='True',
+    title1=L('Spotify'),
+    title2=L('Spotify'),
+    no_cache=True,
+    message = errorMessage,
+    source_title=L('Spotify'))
+  if errorMessage==None and data.Ready():
+    oc.add(DirectoryObject(key=Callback(GetLibrary), title=L("Your Music"), thumb=R('yourMusic.png'), art=R(ART)))
+    oc.add(DirectoryObject(key=Callback(GetCategories), title=L("Categories"), thumb=R('browse.png'), art=R(ART)))
+    oc.add(DirectoryObject(key=Callback(GetFeaturedPlaylists), title=L("Featured Playlists"), thumb=R('featured.png'), art=R(ART)))
+    oc.add(PopupDirectoryObject(key=Callback(GetNewReleases), title=L("New Releases"), thumb=R('newRelease1_1.png'), art=R(ART)))
+
+  oc.add(PrefsObject(title=L('Preferences'), thumb=R('preferences1_1.png')))
+  oc.add(PopupDirectoryObject(key=Callback(GetAbout), title=L("About"), thumb=R(ABOUT), art=R(ART)))  
   return oc
 
-@route(PREFIX + '/my/albums')
-def listMyAlbums():
-  url = "https://api.spotify.com/v1/me/albums"
-  response = ApiRequest(url)
-  # Log (response)
-  oc = ObjectContainer(title2="My Albums")
-  items = response['items']
-  for item in items:
-    album = item['album']
-    icon = ""
-    iconSize = 0
-    for image in album['images']:
-      if image['width']>iconSize:
-        icon = image['url']
-        iconSize = image['width']
-    oc.add(AlbumObject(key=PREFIX+"/albums/"+album['id'], rating_key=album['id'], title=album['name'], thumb=icon))
-  return oc
+@route(PREFIX+"/about")
+def GetAbout(**kwargs):
+  # bulletPrefix = r' • '
+  bulletPrefix = u'\u2001\u2022\u0020'
+  directoryTemplate = r'<Directory art="'+R(ART)+r'" thumb="'+R("about1_1.png")+r'" key="'+Callback(GetAbout)+r'" title="%s"/>'
+  content = r'<MediaContainer art="'+R(ART)+r'" title1="'+L("Spotify")+r'" title2="'+L("About")+r'" size="16" identifier="'+Plugin.Identifier+r'" sourceTitle="'+L("Spotify")+r'" mediaTagPrefix="/system/bundle/media/flags/" prefsKey="/:/plugins/'+Plugin.Identifier+r'/prefs">'
+  content+= directoryTemplate%(L("Version")+": "+VERSION)
+  content+= directoryTemplate%(bulletPrefix+L("Data Service Status")+": %s"%(getDataServiceStatus()))
+  content+= directoryTemplate%(bulletPrefix+L("Playback Service Status")+": %s"%(getPlaybackServiceStatus()))
+  content+= directoryTemplate%(bulletPrefix+L("Stream Service Status")+": %s"%(getStreamServiceStatus()))
+  content+= directoryTemplate%(L("Code Credits"))
+  content+= directoryTemplate%(bulletPrefix+r'&quot;pyspotify-ctypes&quot; by mazkolain (https://github.com/mazkolain/pyspotify-ctypes)')
+  content+= directoryTemplate%(L("Icon Credits"))
+  content+= directoryTemplate%(bulletPrefix+r'Artists Icon: &quot;Microphone&quot; Created By EliRatus from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Playlists Icon: &quot;Music&quot; Created By Marco Galtarossa from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Categories Icon: &quot;Records&quot; Created By Oliviu Stoian from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'New Releases Icon: &quot;Equalizer&quot; Created By Marco Galtarossa from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Preferences Icon: &quot;Gears&quot; Created By Sergey Demushkin from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'About Icon: &quot;About&quot; Created By Hector from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Next Icon: &quot;Right&quot; Created By Hea Poh Lin from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Previous Icon: &quot;Left&quot; Created By Hea Poh Lin from the Noun Project')
+  content+= directoryTemplate%(bulletPrefix+r'Featured Playlists Icon: &quot;Star&quot; Created By Kevin from the Noun Project')
+
+  content+= r'</MediaContainer>'
+  Log(content)
+  tree = etree.fromstring(str(content))
+  return tree
+  # oc = ObjectContainer(title2=L("About"))
+  # oc.add(DirectoryObject(key=Callback(GetAbout), title=L("Version")+": "+VERSION, thumb=R(ABOUT)))
+  # oc.add(DirectoryObject(key=Callback(GetAbout), title=u'●'+L("Data Service Status")+": %s"%(getDataServiceStatus()), thumb=R(ABOUT)))
+  # oc.add(DirectoryObject(key=Callback(GetAbout), title=u'●'+L("Playback Service Status")+": %s"%(getPlaybackServiceStatus()), thumb=R(ABOUT)))
+  # oc.add(DirectoryObject(key=Callback(GetAbout), title=u'\u0149'+L("Stream Service Status")+": %s"%(getStreamServiceStatus()), thumb=R(ABOUT)))
+  # oc.add(DirectoryObject(key=Callback(GetAbout), title=L("Credits"), thumb=R(ABOUT)))
+  # return oc
+
+@route(PREFIX+"/library")
+def GetLibrary(**kwargs):
+  oc = ObjectContainer(title2=L("Your Music"))
+  oc.add(DirectoryObject(key=Callback(GetLibraryArtists), title=L("Artists"), thumb=R('artists.png'), art=R(ART)))
+  oc.add(DirectoryObject(key=Callback(GetLibraryAlbums), title=L("Albums"), thumb=R('albums.png'), art=R(ART)))
+  oc.add(DirectoryObject(key=Callback(GetLibraryTracks), title=L("Songs"), thumb=R('songs.png'), art=R(ART)))
+  oc.add(DirectoryObject(key=Callback(GetMyPlaylists), title=L("Playlists"), thumb=R('playlists.png'), art=R(ART)))
   
-@route(PREFIX + '/albums/{id}')
-def GetAlbum(id):
-  url = "https://api.spotify.com/v1/albums/"+id
-  album = ApiRequest(url)
-  oc = ObjectContainer(title2=album['name'])
+  return oc
+
+@route(PREFIX+"/categories")
+def GetCategories(**kwargs):
+  categories = data.LookupCategories()
+  oc = ObjectContainer(title2=L("Browse"))
+  for category in categories:
+    oc.add(DirectoryObject(key=Callback(GetCategoryPlaylists, id=category['id'], name=category['name']), title=category['name'], thumb=FindBiggestImage(category['icons']), art=R(ART)))
+  return oc
+
+@route(PREFIX+"/featured")
+def GetFeaturedPlaylists(**kwargs):
+  playlists = data.LookupFeaturedPlaylists()
+  oc = ObjectContainer(title2=L('Featured'))
+  for playlist in playlists:
+    oc.add(PlaylistObject(key=Callback(GetPlaylistTracks, owner=playlist['owner']['id'], id=playlist['id'] ), title=playlist['name'], thumb=FindBiggestImage(playlist['images']), art=R(ART)))
+  return oc
+
+@route(PREFIX+"/categories/{id}/playlists")
+def GetCategoryPlaylists(id, **kwargs):
+  playlists = data.LookupCategoryPlaylists(id)
+  oc = ObjectContainer(title2=kwargs['name'])
+  for playlist in playlists:
+    oc.add(PlaylistObject(key=Callback(GetPlaylistTracks, owner=playlist['owner']['id'], id=playlist['id'] ), title=playlist['name'], thumb=FindBiggestImage(playlist['images']), art=R(ART)))
+  return oc
+
+@route(PREFIX + '/my/tracks')
+def GetLibraryTracks(page=1, **kwargs):
+  Log.Debug('listMyTracks')
+  
+  itemsPerPage = int(Prefs['max_page_items'])
+  
+  tracks = saved_track_list
+  totalTracks = len(tracks)
+  Log.Debug('totalTracks= %s'%(totalTracks))
+  endIndex = int(page)*itemsPerPage
+  startIndex = endIndex-itemsPerPage
+  endIndex = min(endIndex,totalTracks)
+
+  oc = ObjectContainer(title2=L("Songs"), no_history=True, replace_parent=True)
+
+  if int(page)>1:
+    oc.add(DirectoryObject(key=Callback(GetLibraryTracks, page=int(page)-1), title=L("Previous"), thumb=R('back1_1.png')))
+  for track in tracks[startIndex:endIndex]:
+    callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
+    oc.add(BuildTrack(track['album'],track, callback, Prefs['force_transcode']))
+  if endIndex<totalTracks: 
+    oc.add(NextPageObject(key=Callback(GetLibraryTracks, page=int(page)+1), title=L("Next"), thumb=R('next1_1.png')))
+  return oc
+
+@route(PREFIX+'/my/playlists')
+def GetMyPlaylists(**kwargs):
+  playlists = data.LookupLibraryPlaylists()
+  oc = ObjectContainer(title2=L("Playlists"))
+  for playlist in playlists:
+    oc.add(PlaylistObject(key=Callback(GetPlaylistTracks, owner=playlist['owner']['id'], id=playlist['id']), title=playlist['name'], thumb=FindBiggestImage(playlist['images']), art=R(ART)))
+  return oc
+
+@route(PREFIX+'/playlists/{owner}/{id}')
+def GetPlaylistTracks(owner, id, **kwargs):
+  tracks = data.LookupPlaylistTracks(owner,id)
+  oc = ObjectContainer()
+  for trackInfo in tracks:
+    track = trackInfo['track']
+    if track['id']:
+      callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
+      oc.add(BuildTrack(track['album'], track, callback, Prefs['force_transcode']))
+  return oc
+
+@route(PREFIX + '/library/artists')
+def GetLibraryArtists(page=1, **kwargs):
+  Log.Debug('listMyArtists')
+
+  artists = artist_index
+  totalTracks = len(artists)
+  if useLibraryMode():
+    itemsPerPage = totalTracks
+  else:
+    itemsPerPage = int(Prefs['max_page_items'])
+  # Log.Debug('totalTracks= %s'%(totalTracks))
+  endIndex = int(page)*itemsPerPage
+  startIndex = endIndex-itemsPerPage
+  endIndex = min(endIndex,totalTracks)
+
+  oc = ObjectContainer(title2=L("Artists"), content="artist", no_cache=True, mixed_parents=True)
+  if useLibraryMode()==True:
+    oc.identifier="com.plexapp.plugins.library"
+  if int(page)>1:
+    oc.add(DirectoryObject(key=Callback(GetLibraryArtists, page=int(page)-1), title=L("Previous"), thumb=R('back1_1.png')))
+  sortedArtists = sorted(artists.values(), key=lambda a: a['name'].lower())
+  for artist in sortedArtists[startIndex:endIndex]:
+    if useLibraryMode()==True:
+      callback = Callback(GetLibraryArtistChildren, id=artist['id'])
+    else:
+      callback = Callback(GetLibraryArtistAlbums, id=artist['id'])
+    oc.add(BuildArtist(artist, callback))
+  if endIndex<totalTracks: 
+    oc.add(NextPageObject(key=Callback(GetLibraryArtists, page=int(page)+1), title=L("Next"), thumb=R('next1_1.png')))
+  return oc
+
+@route(PREFIX + '/newreleases')
+def GetNewReleases(**kwargs):
+  albums = data.LookupNewReleases()
+  oc = ObjectContainer(title2=L("Albums"), no_cache=True, mixed_parents=True)
+  if useLibraryMode()==True:
+    oc.identifier="com.plexapp.plugins.library"
+  for album in albums: 
+    if useLibraryMode()==True:
+      callback = Callback(GetAlbumChildren, id=album['id'])
+    else:
+      callback = Callback(GetAlbumTracks, id=album['id'])
+    oc.add(BuildAlbum(album, album['artists'][0], callback))
+  return oc
+
+@route(PREFIX + '/library/albums')
+def GetLibraryAlbums(page=1, **kwargs):
+  Log.Debug('listMyAlbums')
+
+  
+  
+  albums = album_index
+  totalTracks = len(albums)
+  if useLibraryMode():
+    itemsPerPage = totalTracks
+  else:
+    itemsPerPage = int(Prefs['max_page_items'])
+  # Log.Debug('totalTracks= %s'%(totalTracks))
+  endIndex = int(page)*itemsPerPage
+  startIndex = endIndex-itemsPerPage
+  endIndex = min(endIndex,totalTracks)
+
+  oc = ObjectContainer(title2=L("Albums"), no_cache=True, mixed_parents=True)
+  if useLibraryMode()==True:
+    oc.identifier="com.plexapp.plugins.library"
+
+  if int(page)>1:
+    oc.add(DirectoryObject(key=Callback(GetLibraryAlbums, page=int(page)-1), title=L("Previous"), thumb=R('back1_1.png')))
+  sortedAlbums = sorted(albums.values(), key=lambda a: a['name'].lower())
+  for album in sortedAlbums[startIndex:endIndex]:
+    if useLibraryMode()==True:
+      callback = Callback(GetLibraryAlbumChildren, id=album['id'])
+    else:
+      callback = Callback(GetLibraryAlbumTracks, id=album['id'])
+    oc.add(BuildAlbum(album, album['artists'][0], callback))
+  if endIndex<totalTracks: 
+    oc.add(NextPageObject(key=Callback(GetLibraryAlbums, page=int(page)+1), title=L("Next"), thumb=R('next1_1.png')))
+  return oc
+
+@route(PREFIX + "/my/artists/{id}")
+def GetLibraryArtist(id, **kwargs):
+  Log.Debug("GetLibraryArtist(id={0})".format(id))
+  artist = artist_index[id]
+  oc = ObjectContainer()
+  if useLibraryMode()==True:
+    callback = Callback(GetLibraryArtistChildren, id=artist['id'])
+  else:
+    callback = Callback(GetLibraryArtistAlbums, id=artist['id'])
+  oc.add(BuildArtist(artist, callback))
+  return oc
+
+@route(PREFIX + "/artists/{id}")
+def GetArtist(id, **kwargs):
+  Log.Debug("GetArtist(id={0})".format(id))
+  artist = data.LookupArtist(id)  
+  oc = ObjectContainer()
+  if useLibraryMode()==True:
+    callback = Callback(GetArtistChildren, id=artist['id'])
+  else:
+    callback = Callback(GetArtistAlbums, id=artist['id'])
+  oc.add(BuildArtist(artist, callback))
+  return oc
+
+@route(PREFIX + '/my/artists/{id}/children')
+def GetLibraryArtistChildren(id, **kwargs):
+  return GetLibraryArtistAlbums(id, **kwargs)
+
+@route(PREFIX + '/my/artists/{id}/albums')
+def GetLibraryArtistAlbums(id, **kwargs):
+  artist = artist_index[id]
+  albums = artist['albums']
+  oc = ObjectContainer(art=FindBiggestImage(artist['images']),no_cache=True, title1="Artist", title2=artist['name'])
+  if useLibraryMode()==True:
+    oc.identifier="com.plexapp.plugins.library"
+  for album in albums:
+    if useLibraryMode()==True:
+      callback = Callback(GetLibraryAlbumChildren, id=album['id'])
+    else:
+      callback = Callback(GetLibraryAlbumTracks, id=album['id'])
+    oc.add(BuildAlbum(album,artist,callback))
+  return oc
+
+@route(PREFIX + "/artists/{id}/children")
+def GetArtistChildren(id, **kwargs):
+  return GetArtistAlbums(id,**kwargs)
+
+@route(PREFIX + "/artists/{id}/albums")
+def GetArtistAlbums(id, **kwargs):
+  Log.Debug("GetArtistAlbums(id={0})".format(id))
+  artist = data.LookupArtist(id)
+  albums = data.LookupArtistAlbums(id)
+  oc = ObjectContainer(art=FindBiggestImage(artist['images']),no_cache=True, title1="Artist", title2=artist['name'])
+  if useLibraryMode()==True:
+    oc.identifier="com.plexapp.plugins.library"
+  for album in albums:
+    if useLibraryMode()==True:
+      callback = Callback(GetAlbumChildren, id=album['id'])
+    else:
+      callback = Callback(GetAlbumTracks, id=album['id'])
+    oc.add(BuildAlbum(album,artist,callback))
+  return oc
+
+@route(PREFIX + "/albums/{id}")
+def GetAlbum(id, **kwargs):
+  Log.Debug("GetAlbum(id={0})".format(id))
+  oc = ObjectContainer(no_cache=True)
+  album = data.LookupAlbum(id)
+  if useLibraryMode()==True:
+    callback = Callback(GetAlbumChildren, id=album['id'])
+  else:
+    callback = Callback(GetAlbumTracks, id=album['id'])
+  do = BuildAlbum(album, album['artists'][0], callback)
+  oc.add(do)
+  return oc
+
+@route(PREFIX + "/my/albums/{id}")
+def GetLibraryAlbum(id, **kwargs):
+  Log.Debug("GetAlbum(id={0})".format(id))
+  album = album_index[id]
+  artist = album['artists'][0]
+  oc = ObjectContainer(no_cache=True)
+  if useLibraryMode()==True:
+    callback = Callback(GetAlbumChildren, id=album['id'])
+  else:
+    callback = Callback(GetAlbumTracks, id=album['id'])
+  do = BuildAlbum(album, artist, callback)
+  oc.add(do)
+  return oc
+
+@route(PREFIX + '/my/albums/{id}/children')
+def GetLibraryAlbumChildren(id, **kwargs):
+  return GetLibraryAlbumTracks(id, **kwargs)
+  
+@route(PREFIX + '/my/albums/{id}/tracks')
+def GetLibraryAlbumTracks(id, **kwargs):
+  Log.Debug("GetLibraryAlbumTracks(id={0}, args={1})".format(id, kwargs))
+  album = album_index[id]
+  artist = album['artists'][0]
+
+  icon = FindBiggestImage(album['images'])
+  oc = ObjectContainer(title1=album['artists'][0]['name'], title2=album['name'], no_cache=True, art=icon)
   for track in album['tracks']['items']:
-    trackId = track['id']
-    trackDuration = track['duration_ms']
-    trackTitle = track['name']
-    trackNumber = track['track_number']
-    albumName = album['name']
-    artistName = track['artists'][0]['name']
-    genres = []
-    tags = []
-    rating=0.0
-    sourceTitle="Spotify"
-    Log ("trackId="+trackId+" trackDuration="+str(trackDuration)+" trackTitle="+trackTitle+" trackNumber="+str(trackNumber)+" albumName="+albumName+" artistName="+artistName)
-    oc.add(TrackObject(key=PREFIX+"/tracks/"+trackId, rating_key=trackId, duration=trackDuration, title=trackTitle, index=trackNumber, artist=artistName, album=albumName,  genres=genres, tags=tags,  rating=rating, source_title=sourceTitle))
+    callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
+    oc.add(BuildTrack(album, track, callback, Prefs['force_transcode']))
+  return oc
+
+
+@route(PREFIX + '/albums/{id}/children')
+def GetAlbumChildren(id, **kwargs):
+  return GetAlbumTracks(id, **kwargs)
+  
+@route(PREFIX + '/albums/{id}/tracks')
+def GetAlbumTracks(id, **kwargs):
+  Log.Debug("GetAlbumTracks(id={0}, args={1})".format(id, kwargs))
+  album = data.LookupAlbum(id)
+  
+  icon = FindBiggestImage(album['images'])
+  oc = ObjectContainer(title1=album['artists'][0]['name'], title2=album['name'], no_cache=True, art=icon)
+  for track in album['tracks']['items']:
+    callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
+    oc.add(BuildTrack(album, track, callback, Prefs['force_transcode']))
   return oc
 
 @route(PREFIX + '/tracks/{id}')
-def GetTrack(id):
-  pass
+def GetTrack(id, transcode=False, **kwargs):
+  Log.Debug("GetTrack(id={0}, transcode={1})".format(id,transcode))
+  track = data.LookupTrack(id)
+  album = track['album']
+  oc = ObjectContainer()
+  callback = Callback(GetTrack, id=track['id'], transcode = transcode)
+  oc.add(BuildTrack(album,track,callback, transcode))
+  return oc
 
+# @route(PREFIX + '/tracks/{id}/stream')
+# def GetTrackStream(id, **kwargs):
+#   Log.Debug("GetTrack(id={0})".format(id))
+#   track = data.LookupTrack(id)
+#   album = track['album']
 
-def ApiRequest(url):
-#  try:
-    Log ("ApiRequest(url) url="+url)
-    Log ("ApiRequest(url) access_token="+Dict['access_token'])
-    headers = {"Authorization":"Bearer "+Dict['access_token']}
-    return JSON.ObjectFromURL(url, headers=headers)
-#  except HTTPError as err:
-#    Log ("HTTPError "+err)
-
-
-
-####################################################################################################
-## AUTHENTICATION
-####################################################################################################
-@route(PREFIX + '/authenticate')
-def Authenticate():
-  Log ("Authenticate()")
-   
-  if Prefs['code'] and Prefs['code']!=Dict['code']:  
-    if 'access_token' in Dict:
-      del Dict['access_token']
-    code = Prefs['code']
-    Dict['code']=code
-    authRequest = "https://accounts.spotify.com/api/token"
-    postValues = {}
-    postValues["grant_type"]="authorization_code"
-    postValues["code"]=code
-    postValues["redirect_uri"]="https%3A%2F%2Fquavarus.github.io%2FSpotify.bundle%2FWeb%2Fcallback.htm"
-    postValues["client_id"]=CLIENT_ID
-    postValues["client_secret"]=CLIENT_SECRET
-#    headers = {'Authorization':'Basic '+String.Encode(CLIENT_ID+":"+CLIENT_SECRET)}
-    # Prefs['code'] = None
-    Log (authRequest)
-    Log (code)
-    authResponse = JSON.ObjectFromURL(authRequest, values=postValues)
-    Dict['access_token'] = authResponse['access_token']
-    Dict['refresh_token'] = authResponse['refresh_token']
-    Dict['expires_in'] = authResponse['expires_in']
-    Log (Dict['access_token'])
-
-  if 'access_token' in Dict:
-    return True
-  else:
-    return False
-
+#   oc = ObjectContainer()
+#   callback = Callback(GetTrack, id=id)
+#   oc.add(BuildTrack(album,track,callback))
+#   return oc
