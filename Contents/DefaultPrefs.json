@@ -1,47 +1,46 @@
 [
     {
-        "id": "code",
+        "id": "username",
         "type": "text",
-        "label": "PREF_CODE",
+        "label": "Username",
         "default": ""
     },
     {
-        "id": "displayAlbumYear",
-        "type": "bool",
-        "label": "PREF_SHOWALBUMYEAR",
-        "default": "false"
+        "id": "password",
+        "type": "text",
+        "option": "hidden",
+        "label": "Password",
+        "default": ""
     },
     {
-        "id": "proxy_tracks",
+        "id": "library_refresh_interval",
+        "type": "enum",
+        "values": ["2 Minutes", "5 Minutes", "15 Minutes", "1/2 Hour", "1 Hour"],
+        "default": "5 Minutes",
+        "label": "Library Refresh Interval"
+    },
+    {
+        "id": "stream_port",
+        "type": "text",
+        "label": "Streaming Port",
+        "default": "8090"
+    },
+    {
+        "id": "enable_library_mode",
         "type": "bool",
-        "label": "PREF_SS_ENABLED",
+        "label": "Enable Library Mode",
         "default": "true"
     },
     {
-        "id": "proxy_hostname",
+        "id": "force_transcode",
+        "type": "bool",
+        "label": "Transcode All",
+        "default": "false"
+    },
+    {
+        "id": "max_page_items",
         "type": "text",
-        "label": "PREF_SS_HOSTNAME",
-        "default": ""
-    },
-    {
-        "id": "proxy_ranges",
-        "type": "enum",
-        "label": "PREF_SS_RANGES",
-        "values": ["Automatic", "Disabled", "Enabled"],
-        "default": "Automatic"
-    },
-    {
-        "id": "level_events",
-        "type": "enum",
-        "label": "PREF_LEVEL_EVENTS",
-        "values": ["INFO", "DEBUG"],
-        "default": "INFO"
-    },
-    {
-        "id": "level_streaming",
-        "type": "enum",
-        "label": "PREF_LEVEL_STREAMING",
-        "values": ["INFO", "DEBUG", "TRACE"],
-        "default": "INFO"
+        "label": "Max Items Per Page",
+        "default": "500"
     }
 ]

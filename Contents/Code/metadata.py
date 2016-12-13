@@ -325,6 +325,7 @@ class DataService():
       items.extend(response['items'])
     return items
 
+  def LookupPlaylistTracks(self, owner,id):
     url = "https://api.spotify.com/v1/users/%s/playlists/%s/tracks"%(owner,id)
     response = self.request(url)
     items = response['items']

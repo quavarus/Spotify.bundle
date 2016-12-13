@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleIdentifier</key>
     <string>com.plexapp.plugins.spotify</string>
+    <key>PlexPluginClass</key>
+    <String>Content</String>
     <key>PlexFrameworkVersion</key>
     <string>2</string>
     <key>PlexClientPlatforms</key>
@@ -12,13 +14,21 @@
     <array>
         <string>1</string>
     </array>
-    
+    <key>PlexFrameworkFlags</key>
+<!--     <array>
+        <string>1</string>
+        <string>LogRouteConnections</string>
+        <string>LogAllRouteConnections</string>
+        <string>LogServiceLoads</string>
+        <string>LogModelClassGeneration</string>
+        <string>LogMetadataCombination</string>
+    </array> -->
     <!-- <key>CFBundleShortVersionString</key>
     <string>1.0</string> -->
-   <!--  <key>PlexPluginCodePolicy</key>
-    <string>Elevated</string> -->
-    <!-- <key>PlexPluginMode</key>
-    <string>Daemon</string> -->
+    <key>PlexPluginCodePolicy</key>
+    <string>Elevated</string>
+    <key>PlexPluginMode</key>
+    <string>Daemon</string>
     <!-- <key>PlexPluginLogLevel</key>
     <string>Debug</string> -->
     <!-- <key>PlexPluginTesterFlags</key>
