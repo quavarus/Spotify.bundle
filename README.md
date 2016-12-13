@@ -8,4 +8,4 @@ This is a plugin to add a Spotify Channel to Plex Media Server.
 * Searching has not yet been implemented  
 
 
-Check the [Issues](issues) and [Wiki](wiki) pages for more information.
+Check the [Issues](../../issues) and [Wiki](../../wiki) pages for more information.
