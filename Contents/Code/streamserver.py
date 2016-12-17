@@ -8,7 +8,8 @@ import functools
 
 class StreamServer():
 
-  def __init__(self, playbackService):  
+  def __init__(self, playbackService, standalone=False):  
+    self.standalone = standalone
     self.playbackService = playbackService
     self.application = web.Application([
           (r"/stream/(.+)", StreamHandler,dict(streamer=self.playbackService)),
@@ -23,7 +24,8 @@ class StreamServer():
       self.server = httpserver.HTTPServer(self.application)
       self.server.bind(self.port)
       self.server.start(1)
-      # ioloop.IOLoop.instance().start()
+      if self.standalone:
+        ioloop.IOLoop.instance().start()
       Log("thread exit start")
       self.application.status = StreamServierStatus.Started
     except Exception as e:

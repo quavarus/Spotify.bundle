@@ -91,6 +91,8 @@ class PlaybackService(SessionCallbacks):
           self.session.player_load(track_obj)
           self.session.player_play(True)
           Log("playback started: %s"%(trackId))
+          del link_obj
+          del track_obj
       except Exception as e:
         Log("Playback Service: Error Starting Track %s"%(e))
         self.endTrack_Internal()
@@ -100,10 +102,11 @@ class PlaybackService(SessionCallbacks):
       try:
         total_samples = self.get_total_samples(sample_rate)
         sample_width = self.get_sample_width(sample_type)
-        self.stream.write(total_samples, data, num_samples, sample_width, sample_rate, num_channels)
+        return self.stream.write(total_samples, data, num_samples, sample_width, sample_rate, num_channels)
       except Exception as e:
         Log(e)
         self.endTrack_Internal()
+        return 0
 
   def endTrack_Internal(self):
     Log('endTrack_Internal')

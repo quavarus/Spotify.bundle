@@ -19,23 +19,10 @@ ORIGIN_URL = r'https://accounts.spotify.com'
 
 class DataService():
 
-  def __init__(self, username, password):
+  def __init__(self):
     Log('init DataService')
-    self.username = username
-    self.password = password
-    Dict['password'] = password
-    if self.username == Dict['username']:
-      self.access_token = Dict['access_token']
-      self.refresh_token = Dict['refresh_token']
-      if not self.verifyCommunication():
-        self.ReAuthenticate()
-    else:
-      self.access_token=None
-      self.refresh_token=None
-      self.Authenticate()
-
+    self.Logout()
     
-
   def ReAuthenticate(self):
     try:
       responseObject= self.callAuthorize()
@@ -264,6 +251,26 @@ class DataService():
 
   ###########################################################################################################
 
+  def Login(self, username, password):
+    self.username = username
+    self.password = password
+    Dict['password'] = password
+    if self.username == Dict['username']:
+      self.access_token = Dict['access_token']
+      self.refresh_token = Dict['refresh_token']
+      if not self.verifyCommunication():
+        self.ReAuthenticate()
+    else:
+      self.access_token=None
+      self.refresh_token=None
+      self.Authenticate()
+
+  def Logout(self):
+    self.username = None
+    self.password = None
+    self.access_token=None
+    self.refresh_token=None
+
   def LookupLibraryAlbums(self):
     url = "https://api.spotify.com/v1/me/albums?offset=0&limit=50"
     response = self.request(url)
@@ -304,6 +311,29 @@ class DataService():
     idString = ",".join(ids)
     url = "https://api.spotify.com/v1/artists?ids="+idString
     return self.request(url)['artists']
+
+  def LookupLibraryArtistAlbums(self, artistId):
+    albums = self.LookupArtistAlbums(artistId)
+    albumIds = []
+    for album in albums:
+      albumIds.append(album['id'])
+    savedAlbumMap = []
+    while len(albumIds)>0:
+      idSet = albumIds[0:50]
+      albumIds = albumIds[50:]
+      Log("idSet=%s"%(idSet))
+      Log("albumIds=%s"%(albumIds))
+      idString = ",".join(idSet)
+      url = "https://api.spotify.com/v1/me/albums/contains?ids="+idString
+      mapSet = self.request(url)
+      savedAlbumMap.extend(mapSet)
+    savedAlbumMap.reverse()
+    savedAlbums = []
+    for album in albums:
+      saved = savedAlbumMap.pop()
+      if saved==True:
+        savedAlbums.append(album)
+    return savedAlbums
 
   def LookupArtistAlbums(self, artistId):
     url = "https://api.spotify.com/v1/artists/{0}/albums".format(artistId)

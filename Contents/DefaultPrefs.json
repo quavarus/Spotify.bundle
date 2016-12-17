@@ -15,7 +15,7 @@
     {
         "id": "library_refresh_interval",
         "type": "enum",
-        "values": ["2 Minutes", "5 Minutes", "15 Minutes", "1/2 Hour", "1 Hour"],
+        "values": ["Off", "1 Minute", "2 Minutes", "5 Minutes", "15 Minutes", "1/2 Hour", "1 Hour"],
         "default": "5 Minutes",
         "label": "Library Refresh Interval"
     },

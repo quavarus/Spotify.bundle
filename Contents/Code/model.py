@@ -93,7 +93,7 @@ def BuildTrack(album, track, callback, transcode=False):
   sourceTitle=None
   icon = FindBiggestImage(album['images'])
   port = Prefs['stream_port']
-  trackUrl = "http://{0}:{1}/stream/{2}".format(Network.Address, port, track['id'])
+  trackUrl = "http://{0}:{1}/stream/{2}".format(Dict['LocalAddress'], port, track['id'])
   if transcode=="true":
     mediaItem = BuildMP3Media(trackId, trackDuration)
   else:
@@ -105,14 +105,14 @@ def BuildTrack(album, track, callback, transcode=False):
 def isExternal():
   host = getattr(Request,'_context').request.host
   hostSplit = host.split(":")
-  return hostSplit[0]==Network.PublicAddress
+  return hostSplit[0]==Dict['PublicAddress']
 
 def BuildWavMedia(trackId, trackDuration):
   port = Prefs['stream_port']
   if isExternal():
-    address = Network.PublicAddress
+    address = Dict['PublicAddress']
   else:
-    address = Network.Address
+    address = Dict['LocalAddress']
   trackUrl = "http://{0}:{1}/stream/{2}".format(address, port, trackId)
   return MediaObject(audio_channels=2, audio_codec="pcm", container="wav", duration=trackDuration, parts=[PartObject(key=trackUrl,duration=trackDuration,streams=[AudioStreamObject(channels=2, codec="pcm", duration=trackDuration, bitrate=320)])])
 

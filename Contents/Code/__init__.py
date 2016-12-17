@@ -13,7 +13,13 @@ ICON = 'icon-default.png'
 ART = "concert.jpeg"
 ABOUT = "about1_1.png"
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
+
+data = DataService()
+playback = PlaybackService()
+playback.start()
+streamserver = StreamServer(playback)
+cache = dict()
 
 ####################################################################################################
 def Start():
@@ -21,13 +27,8 @@ def Start():
   HTTP.CacheTime = None
 
   ObjectContainer.art = R(ART)
-
-  global playback
-  playback = PlaybackService()
-  playback.start()
-  global streamserver
-  streamserver = StreamServer(playback)
-
+  Dict['LocalAddress']=Network.Address
+  Dict['PublicAddress']=Network.PublicAddress
   Initialize()
   Thread.Create(refreshLibraryIndex)
 
@@ -35,8 +36,7 @@ def Initialize():
   Log.Debug("Initialize()")
 
   if not checkPreferences():
-    global data
-    data = DataService(Prefs['username'], Prefs['password'])
+    data.Login(Prefs['username'], Prefs['password'])
     if data.Ready():
 
       playback.logout()
@@ -45,10 +45,8 @@ def Initialize():
       streamserver.start(int(Prefs['stream_port']))
       if 'library_user' not in Dict or Dict['library_user']!=Prefs['username']:
         buildLibraryIndex()
-        loadLibraryIndexGlobally()
-      try:
-        track_index
-      except NameError:
+      
+      if not 'saved_track_list' in cache:
         loadLibraryIndexGlobally()
       
     
@@ -90,96 +88,96 @@ def checkPreferences():
 
 def refreshLibraryIndex():
   while True:
-    if Prefs['library_refresh_interval'] == "2 Minutes":
-      interval = 60*2
-    elif Prefs['library_refresh_interval'] ==  "5 Minutes":
-      interval = 60*5
-    elif Prefs['library_refresh_interval'] ==  "15 Minutes":
-      interval = 60*15
-    elif Prefs['library_refresh_interval'] ==  "1/2 Hour":
-      interval = 60*30
-    elif Prefs['library_refresh_interval'] ==  "1 Hour":
-      interval = 60*60
-    else:
-      interval = 60*5
-    Thread.Sleep(interval)
-    buildLibraryIndex()
-    loadLibraryIndexGlobally()
+    try:
+      if Prefs['library_refresh_interval'] == "Off":
+        interval = 0
+      elif Prefs['library_refresh_interval'] == "1 Minute":
+        interval = 60*1
+      elif Prefs['library_refresh_interval'] == "2 Minutes":
+        interval = 60*2
+      elif Prefs['library_refresh_interval'] ==  "5 Minutes":
+        interval = 60*5
+      elif Prefs['library_refresh_interval'] ==  "15 Minutes":
+        interval = 60*15
+      elif Prefs['library_refresh_interval'] ==  "1/2 Hour":
+        interval = 60*30
+      elif Prefs['library_refresh_interval'] ==  "1 Hour":
+        interval = 60*60
+      else:
+        interval = 60*5
+
+      if interval==0:
+        Thread.Sleep(60*5)
+      else:
+        Thread.Sleep(interval)
+        buildLibraryIndex()
+    except Exception as ex:
+      Log.Warn("An error ocurred refreshing library index. Will continue after next interval. ex=%s"%ex)
 
 def buildLibraryIndex():
   Log.Debug('Start Refreshing Library Index')
   if data.Ready():
     tracks = {}
     albums = {}
+    artistIds = set()
     artists = {}
+    artistAlbums = {}
     
     items = data.LookupLibraryTracks()
     for item in items:
       track = item['track']
       tracks[track['id']] = track
-
-    items = data.LookupLibraryAlbums()
-    for item in items:
-
-      album = item['album']
-
-      albumArtists = []
-      artistList = album['artists']
-      for artist in artistList:
-        if artist['id'] not in artists:
-          artists[artist['id']] = artist
-          artists[artist['id']]['albums'] = []
-        albumArtists.append(artists[artist['id']])
-        
-      if album['id'] not in albums:
-        album['artists'] = albumArtists
-        albums[album['id']] = album
-
-      for artist in albumArtists:
-        artist['albums'].append(album)
+      albums[track['album']['id']] = track['album']
+      for artist in track['album']['artists']:
+        artistIds.add(artist['id'])
+        if not artist['id'] in artistAlbums:
+          artistAlbums[artist['id']] = {}
+        aAlbums = artistAlbums[artist['id']]
+        aAlbums[track['album']['id']] = track['album']
 
     artistLookupList = []
-    for id, artist in artists.iteritems():
-      artistLookupList.append(artist['id'])
+    for id in artistIds:
+      artistLookupList.append(id)
       if len(artistLookupList) == 50:
         fullArtists = data.LookupArtists(artistLookupList)
         for fullArtist in fullArtists:
-          artists[fullArtist['id']]['images'] = fullArtist['images']
+          artists[fullArtist['id']] = fullArtist
         del artistLookupList[:]
     if len(artistLookupList) > 0:
       fullArtists = data.LookupArtists(artistLookupList)
       for fullArtist in fullArtists:
-        artists[fullArtist['id']]['images'] = fullArtist['images']
+        artists[fullArtist['id']] = fullArtist
+
 
     Dict['library_user']=Prefs['username']
+    cache['track_index'] = tracks
+    trackList = sorted(tracks.values(), key=lambda t: t['name'].lower())
+    cache['saved_track_list'] = trackList
+    cache['album_index'] = albums
+    cache['artist_index'] = artists
+    cache['artist_albums_index'] = artistAlbums
+
     Data.SaveObject('library_track_index',tracks)
+    Data.SaveObject('library_track_list',trackList)
     Data.SaveObject('library_album_index',albums)
     Data.SaveObject('library_artist_index',artists)
+    Data.SaveObject('library_artist_albums_index',artistAlbums)
 
   Log.Debug('Finished Refreshing Library Index')
 
 def loadLibraryIndexGlobally():
-  global track_index
-  track_index = {}
-  global saved_track_list
-  saved_track_list = []
-  global album_index
-  album_index = {}
-  global artist_index
-  artist_index = {}
 
   if Dict['library_user']==Prefs['username']:
     if Data.Exists('library_track_index'):
-      global track_index
-      track_index = Data.LoadObject('library_track_index')
-      global saved_track_list
-      saved_track_list = sorted(track_index.values(), key=lambda t: t['name'].lower())
+      cache['track_index'] = Data.LoadObject('library_track_index')
+    if Data.Exists('library_track_list'):
+      cache['saved_track_list'] = Data.LoadObject('library_track_list')
     if Data.Exists('library_album_index'):
-      global album_index
-      album_index = Data.LoadObject('library_album_index')
+      cache['album_index'] = Data.LoadObject('library_album_index')
     if Data.Exists('library_artist_index'):
-      global artist_index
-      artist_index = Data.LoadObject('library_artist_index')
+      cache['artist_index'] = Data.LoadObject('library_artist_index')
+    if Data.Exists('library_artist_albums_index'):
+      cache['artist_albums_index'] = Data.LoadObject('library_artist_albums_index')
   Log.Debug('Loaded Library Index Globally')
 
 def getErrorMessage():
@@ -314,7 +312,7 @@ def GetLibraryTracks(page=1, **kwargs):
   
   itemsPerPage = int(Prefs['max_page_items'])
   
-  tracks = saved_track_list
+  tracks = cache['saved_track_list']
   totalTracks = len(tracks)
   Log.Debug('totalTracks= %s'%(totalTracks))
   endIndex = int(page)*itemsPerPage
@@ -355,7 +353,7 @@ def GetPlaylistTracks(owner, id, **kwargs):
 def GetLibraryArtists(page=1, **kwargs):
   Log.Debug('listMyArtists')
 
-  artists = artist_index
+  artists = cache['artist_index']
   totalTracks = len(artists)
   if useLibraryMode():
     itemsPerPage = totalTracks
@@ -402,7 +400,7 @@ def GetLibraryAlbums(page=1, **kwargs):
 
   
   
-  albums = album_index
+  albums = cache['album_index']
   totalTracks = len(albums)
   if useLibraryMode():
     itemsPerPage = totalTracks
@@ -433,7 +431,7 @@ def GetLibraryAlbums(page=1, **kwargs):
 @route(PREFIX + "/my/artists/{id}")
 def GetLibraryArtist(id, **kwargs):
   Log.Debug("GetLibraryArtist(id={0})".format(id))
-  artist = artist_index[id]
+  artist = cache['artist_index'][id]
   oc = ObjectContainer()
   if useLibraryMode()==True:
     callback = Callback(GetLibraryArtistChildren, id=artist['id'])
@@ -460,12 +458,14 @@ def GetLibraryArtistChildren(id, **kwargs):
 
 @route(PREFIX + '/my/artists/{id}/albums')
 def GetLibraryArtistAlbums(id, **kwargs):
-  artist = artist_index[id]
-  albums = artist['albums']
+  artist = cache['artist_index'][id]
+  artistAlbums = cache['artist_albums_index'][id]
+  albums = artistAlbums.values()
   oc = ObjectContainer(art=FindBiggestImage(artist['images']),no_cache=True, title1="Artist", title2=artist['name'])
   if useLibraryMode()==True:
     oc.identifier="com.plexapp.plugins.library"
   for album in albums:
+    # if album['id'] in cache['album_index']:
     if useLibraryMode()==True:
       callback = Callback(GetLibraryAlbumChildren, id=album['id'])
     else:
@@ -509,13 +509,13 @@ def GetAlbum(id, **kwargs):
 @route(PREFIX + "/my/albums/{id}")
 def GetLibraryAlbum(id, **kwargs):
   Log.Debug("GetAlbum(id={0})".format(id))
-  album = album_index[id]
+  album = cache['album_index'][id]
   artist = album['artists'][0]
   oc = ObjectContainer(no_cache=True)
   if useLibraryMode()==True:
-    callback = Callback(GetAlbumChildren, id=album['id'])
+    callback = Callback(GetLibraryAlbumChildren, id=album['id'])
   else:
-    callback = Callback(GetAlbumTracks, id=album['id'])
+    callback = Callback(GetLibraryAlbumTracks, id=album['id'])
   do = BuildAlbum(album, artist, callback)
   oc.add(do)
   return oc
@@ -527,14 +527,15 @@ def GetLibraryAlbumChildren(id, **kwargs):
 @route(PREFIX + '/my/albums/{id}/tracks')
 def GetLibraryAlbumTracks(id, **kwargs):
   Log.Debug("GetLibraryAlbumTracks(id={0}, args={1})".format(id, kwargs))
-  album = album_index[id]
+  album =  data.LookupAlbum(id)
   artist = album['artists'][0]
 
   icon = FindBiggestImage(album['images'])
   oc = ObjectContainer(title1=album['artists'][0]['name'], title2=album['name'], no_cache=True, art=icon)
   for track in album['tracks']['items']:
-    callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
-    oc.add(BuildTrack(album, track, callback, Prefs['force_transcode']))
+    if track['id'] in cache['track_index']:
+      callback = Callback(GetTrack, id=track['id'], transcode=Prefs['force_transcode'])
+      oc.add(BuildTrack(album, track, callback, Prefs['force_transcode']))
   return oc
 
 
@@ -563,14 +564,3 @@ def GetTrack(id, transcode=False, **kwargs):
   callback = Callback(GetTrack, id=track['id'], transcode = transcode)
   oc.add(BuildTrack(album,track,callback, transcode))
   return oc
-
-# @route(PREFIX + '/tracks/{id}/stream')
-# def GetTrackStream(id, **kwargs):
-#   Log.Debug("GetTrack(id={0})".format(id))
-#   track = data.LookupTrack(id)
-#   album = track['album']
-
-#   oc = ObjectContainer()
-#   callback = Callback(GetTrack, id=id)
-#   oc.add(BuildTrack(album,track,callback))
-#   return oc
