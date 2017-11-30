@@ -13,7 +13,7 @@ ICON = 'icon-default.png'
 ART = "concert.jpeg"
 ABOUT = "about1_1.png"
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 data = DataService()
 playback = PlaybackService()

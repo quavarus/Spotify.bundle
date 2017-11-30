@@ -166,7 +166,7 @@ class DataService():
       postValues = {}
       postValues["grant_type"]="authorization_code"
       postValues["code"]=params['code']
-      postValues["redirect_uri"]=String.Quote(CALLBACK_URL)
+      postValues["redirect_uri"]=CALLBACK_URL
       postValues["client_id"]=CLIENT_ID
       postValues["client_secret"]=CLIENT_SECRET
 
